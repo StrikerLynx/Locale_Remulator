@@ -95,6 +95,8 @@ VOID FreeStringInternal(LPVOID pBuffer/*ecx*/)
 
 LPWSTR MultiByteToWideCharInternal(LPCSTR lstr, UINT CodePage)
 {
+	if (!lstr)
+		return NULL;
 	int lsize = lstrlenA(lstr)/* size without '\0' */, n = 0;
 	int wsize = (lsize + 1) << 1;
 	LPWSTR wstr = (LPWSTR)HeapAlloc(Original.hHeap, 0, wsize);
@@ -128,6 +130,10 @@ void AttachFunctions()
 {
 	DetourAttach(&(PVOID&)OriginalGetACP, HookGetACP);
 	DetourAttach(&(PVOID&)OriginalGetOEMCP, HookGetOEMCP);
+	DetourAttach(&(PVOID&)OriginalGetConsoleCP, HookGetConsoleCP);
+	DetourAttach(&(PVOID&)OriginalGetConsoleOutputCP, HookGetConsoleOutputCP);
+	DetourAttach(&(PVOID&)OriginalSetConsoleCP, HookSetConsoleCP);
+	DetourAttach(&(PVOID&)OriginalSetConsoleOutputCP, HookSetConsoleOutputCP);
 	DetourAttach(&(PVOID&)OriginalGetCPInfo, HookGetCPInfo);
 	DetourAttach(&(PVOID&)OriginalGetThreadLocale, HookGetThreadLocale);
 	DetourAttach(&(PVOID&)OriginalGetSystemDefaultUILanguage, HookGetSystemDefaultUILanguage);
@@ -213,6 +219,10 @@ void DetachFunctions()
 {
 	DetourDetach(&(PVOID&)OriginalGetACP, HookGetACP);
 	DetourDetach(&(PVOID&)OriginalGetOEMCP, HookGetOEMCP);
+	DetourDetach(&(PVOID&)OriginalGetConsoleCP, HookGetConsoleCP);
+	DetourDetach(&(PVOID&)OriginalGetConsoleOutputCP, HookGetConsoleOutputCP);
+	DetourDetach(&(PVOID&)OriginalSetConsoleCP, HookSetConsoleCP);
+	DetourDetach(&(PVOID&)OriginalSetConsoleOutputCP, HookSetConsoleOutputCP);
 	DetourDetach(&(PVOID&)OriginalGetCPInfo, HookGetCPInfo);
 	DetourDetach(&(PVOID&)OriginalGetThreadLocale, HookGetThreadLocale);
 	DetourDetach(&(PVOID&)OriginalGetSystemDefaultUILanguage, HookGetSystemDefaultUILanguage);
@@ -289,7 +299,22 @@ HWND WINAPI HookCreateWindowExA(
 	DWORD dwExStyle, LPCSTR lpClassName, LPCSTR lpWindowName, DWORD dwStyle,
 	int X, int Y, int nWidth, int nHeight, HWND hWndParent, HMENU hMenu, HINSTANCE hInstance, LPVOID lpParam)
 {
-	LPCWSTR wstrlpClassName = lpClassName ? MultiByteToWideCharInternal(lpClassName) : NULL;
+	bool bAtomClassName = false;
+	LPCWSTR wstrlpClassName = NULL;
+	if (lpClassName) 
+	{
+		// https://learn.microsoft.com/zh-cn/windows/win32/api/winuser/nf-winuser-createwindowexw
+		if ((ULONG_PTR)lpClassName < 65536) 
+		{
+			wstrlpClassName = (LPCWSTR)lpClassName;
+			bAtomClassName = true;
+		}
+		else 
+		{
+			wstrlpClassName = MultiByteToWideCharInternal(lpClassName);
+		}
+	}
+
 	LPCWSTR wstrlpWindowName = lpWindowName ? MultiByteToWideCharInternal(lpWindowName) : NULL;
 	HWND ret = CreateWindowExW(
 		dwExStyle,
@@ -305,7 +330,7 @@ HWND WINAPI HookCreateWindowExA(
 		hInstance,
 		lpParam
 	);
-	if (wstrlpClassName)
+	if (wstrlpClassName && !bAtomClassName)
 	{
 		FreeStringInternal((LPVOID)wstrlpClassName);
 	}
@@ -340,9 +365,30 @@ UINT WINAPI HookGetACP(void)
 {
 	return settings.CodePage;
 }
+
 UINT WINAPI HookGetOEMCP(void)
 {
 	return settings.CodePage;
+}
+
+UINT WINAPI HookGetConsoleCP(VOID) {
+	return settings.CodePage;
+}
+
+UINT WINAPI HookGetConsoleOutputCP(VOID) {
+	return settings.CodePage;
+}
+
+BOOL WINAPI HookSetConsoleCP(
+	_In_ UINT wCodePageID
+) {
+	return OriginalSetConsoleCP(wCodePageID);
+}
+
+BOOL WINAPI HookSetConsoleOutputCP(
+	_In_ UINT wCodePageID
+) {
+	return OriginalSetConsoleOutputCP(wCodePageID);
 }
 
 BOOL WINAPI HookGetCPInfo(
